@@ -7,6 +7,12 @@ tls:
 
 http:
   routers:
+    notify-ws:
+      rule: 'Host(`{{ env "DOMAIN" }}`) && PathPrefix(`/socket.io`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: notification
+
     ui:
       rule: 'Host(`{{ env "DOMAIN" }}`)'
       entryPoints: [websecure]
@@ -14,6 +20,11 @@ http:
       service: ui
 
   services:
+    notification:
+      loadBalancer:
+        servers:
+          - url: "http://notification-service:3004"
+
     ui:
       loadBalancer:
         servers:
