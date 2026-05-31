@@ -13,17 +13,35 @@ http:
       tls: {}
       service: notification
 
+    minio:
+      rule: 'Host(`{{ env "DOMAIN" }}`) && PathPrefix(`/storage`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: minio
+      middlewares: [strip-storage]
+
     ui:
       rule: 'Host(`{{ env "DOMAIN" }}`)'
       entryPoints: [websecure]
       tls: {}
       service: ui
 
+  middlewares:
+    strip-storage:
+      stripPrefix:
+        prefixes:
+          - /storage
+
   services:
     notification:
       loadBalancer:
         servers:
           - url: "http://notification-service:3004"
+
+    minio:
+      loadBalancer:
+        servers:
+          - url: "http://minio:9000"
 
     ui:
       loadBalancer:

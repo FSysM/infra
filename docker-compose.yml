@@ -58,17 +58,10 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       FRONTEND_URL: https://${DOMAIN}
       PORT: "3003"
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: "9000"
-      MINIO_USE_SSL: "false"
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_BUCKET_NAME: fsysm-files
       KAFKA_BROKERS: kafka:9092
+      FILE_MANAGER_URL: http://file-manager:3005
     depends_on:
       postgres:
-        condition: service_healthy
-      minio:
         condition: service_healthy
     networks:
       - traefik-net
@@ -90,6 +83,36 @@ services:
       KAFKA_BROKERS: kafka:9092
     depends_on:
       postgres:
+        condition: service_healthy
+    networks:
+      - traefik-net
+      - backend-net
+
+  file-manager:
+    build:
+      context: ./file-manager
+      dockerfile: Dockerfile
+    container_name: file_manager
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/fsysm
+      KEYCLOAK_URL: http://host.docker.internal:8080
+      KEYCLOAK_REALM: fsysm
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: https://${DOMAIN}
+      PORT: "3005"
+      KAFKA_BROKERS: kafka:9092
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_NAME: fsysm-files
+      MINIO_PUBLIC_URL: https://${DOMAIN}/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     networks:
       - traefik-net
@@ -190,6 +213,7 @@ services:
       retries: 5
       start_period: 10s
     networks:
+      - traefik-net
       - backend-net
 
   minio-init:
