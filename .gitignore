@@ -1,0 +1,4 @@
+.env
+app-layer/
+notification-service/
+ui-layer/

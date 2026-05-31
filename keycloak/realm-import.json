@@ -1,0 +1,92 @@
+{
+  "realm": "fsysm",
+  "enabled": true,
+  "displayName": "FSysM",
+  "accessTokenLifespan": 3600,
+  "roles": {
+    "realm": [
+      { "name": "STUDENT" },
+      { "name": "TEACHER" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "fsysm-app",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "secret": "fsysm-dev-secret",
+      "redirectUris": [
+        "https://localhost/*",
+        "https://localhost/api/auth/callback/keycloak"
+      ],
+      "webOrigins": ["https://localhost"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+  "users": [
+    {
+      "id": "2fb9d22a-32d7-48d9-90f4-d9f91c4c8885",
+      "username": "student1",
+      "email": "student1@email.com",
+      "firstName": "Student",
+      "lastName": "One",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["STUDENT"]
+    },
+    {
+      "id": "46227c5d-24b4-40e9-877f-a98ed9dcbda9",
+      "username": "student2",
+      "email": "student2@email.com",
+      "firstName": "Student",
+      "lastName": "Two",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["STUDENT"]
+    },
+    {
+      "id": "d5412b95-eeff-478a-9ce3-e8323fa95b40",
+      "username": "student3",
+      "email": "student3@email.com",
+      "firstName": "Student",
+      "lastName": "Three",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["STUDENT"]
+    },
+    {
+      "id": "2cb385e4-f0ec-45bb-afa1-6f4c7f88c8f2",
+      "username": "teacher1",
+      "email": "teacher1@email.com",
+      "firstName": "Teacher",
+      "lastName": "One",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["TEACHER"]
+    },
+    {
+      "id": "1ca85ea9-133f-4908-8330-610535113232",
+      "username": "teacher2",
+      "email": "teacher2@email.com",
+      "firstName": "Teacher",
+      "lastName": "Two",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["TEACHER"]
+    },
+    {
+      "id": "5778d982-6325-4f6b-9305-68a82cb49165",
+      "username": "teacher3",
+      "email": "teacher3@email.com",
+      "firstName": "Teacher",
+      "lastName": "Three",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "password", "temporary": false }],
+      "realmRoles": ["TEACHER"]
+    }
+  ]
+}

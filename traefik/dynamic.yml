@@ -1,0 +1,20 @@
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/cert.crt
+        keyFile: /certs/cert.key
+
+http:
+  routers:
+    ui:
+      rule: 'Host(`{{ env "DOMAIN" }}`)'
+      entryPoints: [websecure]
+      tls: {}
+      service: ui
+
+  services:
+    ui:
+      loadBalancer:
+        servers:
+          - url: "http://ui-layer:3000"

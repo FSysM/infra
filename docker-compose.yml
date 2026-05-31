@@ -1,0 +1,271 @@
+services:
+
+  # ─── REVERSE PROXY ────────────────────────────────────────────────────────
+
+  cert-gen:
+    image: alpine
+    restart: "no"
+    volumes:
+      - traefik_certs:/certs
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        if [ -f /certs/cert.crt ]; then echo "Certs already exist, skipping."; exit 0; fi
+        apk add --no-cache openssl >/dev/null 2>&1
+        set -e
+        openssl genrsa -out /certs/ca.key 4096
+        openssl req -new -x509 -days 1825 -key /certs/ca.key -out /certs/ca.crt -subj '/CN=FSysM Local CA/O=FSysM/C=PL'
+        openssl genrsa -out /certs/cert.key 2048
+        openssl req -new -key /certs/cert.key -out /certs/cert.csr -subj '/CN=localhost'
+        printf 'subjectAltName=DNS:localhost,IP:127.0.0.1\n' > /tmp/san.ext
+        openssl x509 -req -days 825 -in /certs/cert.csr -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial -out /certs/cert.crt -extfile /tmp/san.ext
+        rm /certs/cert.csr
+        echo "Certificates generated."
+
+  traefik:
+    image: traefik:v3.7.1
+    container_name: traefik
+    restart: unless-stopped
+    depends_on:
+      cert-gen:
+        condition: service_completed_successfully
+    ports:
+      - "80:80"       # HTTP → redirects to HTTPS
+      - "443:443"     # HTTPS
+      - "8090:8080"   # Traefik dashboard (keep behind firewall)
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - traefik_certs:/certs:ro
+    networks:
+      - traefik-net
+
+  # ─── APPLICATION SERVICES ─────────────────────────────────────────────────
+
+  app-layer:
+    build:
+      context: ./app-layer
+      dockerfile: Dockerfile
+    container_name: app_layer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/fsysm
+      KEYCLOAK_URL: http://host.docker.internal:8080
+      KEYCLOAK_REALM: fsysm
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: https://${DOMAIN}
+      PORT: "3003"
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET_NAME: fsysm-files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - traefik-net
+      - backend-net
+
+  notification-service:
+    build:
+      context: ./notification-service
+      dockerfile: Dockerfile
+    container_name: notification_service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/fsysm
+      KEYCLOAK_URL: http://host.docker.internal:8080
+      KEYCLOAK_REALM: fsysm
+      JWT_SECRET: ${JWT_SECRET}
+      FRONTEND_URL: https://${DOMAIN}
+      PORT: "3004"
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - traefik-net
+      - backend-net
+
+  ui-layer:
+    build:
+      context: ./ui-layer
+      dockerfile: Dockerfile
+    container_name: ui_layer
+    restart: unless-stopped
+    environment:
+      NEXTAUTH_URL: https://${DOMAIN}
+      AUTH_URL: https://${DOMAIN}
+      AUTH_TRUST_HOST: "true"
+      BACKEND_URL: http://app-layer:3003
+      AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_KEYCLOAK_ID: fsysm-app
+      AUTH_KEYCLOAK_SECRET: ${AUTH_KEYCLOAK_SECRET}
+      AUTH_KEYCLOAK_ISSUER: http://host.docker.internal:8080/realms/fsysm
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - app-layer
+    networks:
+      - traefik-net
+
+  # ─── INFRASTRUCTURE ────────────────────────────────────────────────────────
+
+  keycloak:
+    build:
+      context: ./keycloak
+      dockerfile: Dockerfile
+    container_name: auth_provider
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${DB_USER}
+      KC_DB_PASSWORD: ${DB_PASSWORD}
+      KC_HOSTNAME: "http://host.docker.internal:8080"
+      KC_HOSTNAME_ADMIN: "http://localhost:8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8080"
+      KC_LOG_LEVEL: INFO
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: db_provider
+    restart: unless-stopped
+    ports:
+      - "5432:5432"   # Prisma Studio / local DB tools
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: fsysm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d fsysm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - backend-net
+
+  minio:
+    image: minio/minio:latest
+    container_name: storage
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend-net
+
+  minio-init:
+    image: minio/mc:latest
+    restart: on-failure
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+        mc mb --ignore-existing local/fsysm-files
+      "
+    networks:
+      - backend-net
+
+  # ─── MESSAGING ────────────────────────────────────────────────────────────────
+
+  kafka:
+    image: apache/kafka:4.3.0
+    container_name: kafka
+    restart: unless-stopped
+    environment:
+      # KRaft — no Zookeeper
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # Listeners
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Persistence
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+      # Single-node replication (avoids under-replicated partition warnings)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      # Broker tuning
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: "168"
+      KAFKA_NUM_PARTITIONS: "3"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - backend-net
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka_ui
+    restart: unless-stopped
+    ports:
+      - "8092:8080"   # http://localhost:8092
+    environment:
+      KAFKA_CLUSTERS_0_NAME: fsysm-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - backend-net
+
+networks:
+  traefik-net:
+    name: traefik-net
+  backend-net:
+    name: backend-net
+
+volumes:
+  postgres_data:
+  minio_data:
+  keycloak_data:
+  traefik_certs:
+  kafka_data:
