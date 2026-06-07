@@ -67,6 +67,24 @@ services:
       - traefik-net
       - backend-net
 
+  user-service:
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: user_service
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@postgres:5432/fsysm
+      KEYCLOAK_URL: http://host.docker.internal:8080
+      KEYCLOAK_REALM: fsysm
+      FRONTEND_URL: https://${DOMAIN}
+      PORT: "3006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend-net
+
   notification-service:
     build:
       context: ./notification-service
@@ -130,6 +148,7 @@ services:
       AUTH_TRUST_HOST: "true"
       BACKEND_URL: http://app-layer:3003
       NOTIFICATION_SERVICE_URL: http://notification-service:3004
+      USER_SERVICE_URL: http://user-service:3006
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_KEYCLOAK_ID: fsysm-app
       AUTH_KEYCLOAK_SECRET: ${AUTH_KEYCLOAK_SECRET}
@@ -138,6 +157,7 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - app-layer
+      - user-service
     networks:
       - traefik-net
 
