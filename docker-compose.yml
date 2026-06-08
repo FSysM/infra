@@ -83,6 +83,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
+      - traefik-net
       - backend-net
 
   notification-service:
